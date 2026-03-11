@@ -8,7 +8,7 @@ It is designed for reproducible, auditable handling of:
 - ambiguous duplicate / overlapping observations
 - deterministic replay with explicit operator overrides
 
-The goal is not “perfect sourcing”, but a stable QA surface: canonical seed artefacts, linked event rows, severity summaries, and operator review queues.
+The goal is not “perfect sourcing”, but a stable QA surface for reproducible review: canonical seed artefacts, linked event rows, severity summaries, and operator queues.
 
 ```mermaid
 flowchart LR
@@ -22,10 +22,10 @@ flowchart LR
     F --> I[Deterministic replay]
 ```
 
-Core outputs:  
-`seed_yfinance_dividends_all.csv` for canonical seed rows,  
-`econ_severity_summary.csv` for econ-level review, and  
-`qa_queue__econ.csv` / `qa_queue__rows.csv` for operator action surfaces.
+Core outputs:
+- `seed_yfinance_dividends_all.csv` — canonical seed rows
+- `econ_severity_summary.csv` — econ-level review surface
+- `qa_queue__econ.csv` / `qa_queue__rows.csv` — operator action queues
 
 ---
 
