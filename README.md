@@ -1,23 +1,48 @@
-
 # Vendor-Agnostic Dividend Event Ingestion & QA Engine (`divpipe`)
+
+`divpipe` is a vendor-agnostic dividend event ingestion and QA engine for imperfect corporate-action datasets.
+
+It is designed for reproducible, auditable handling of:
+- missing or inconsistent dividend fields
+- mapping failures and unsupported tickers
+- ambiguous duplicate / overlapping observations
+- deterministic replay with explicit operator overrides
+
+The goal is not “perfect sourcing”, but a stable QA surface: canonical seed artefacts, linked event rows, severity summaries, and operator review queues.
+
+```mermaid
+flowchart LR
+    A[ETF holdings input] --> B[iShares normalise]
+    B --> C[Stage 1 ingest]
+    C --> D[Canonical seed artefacts]
+    D --> E[Event linking]
+    E --> F[Severity model]
+    F --> G[QA queues]
+    H[Operator overrides] --> F
+    F --> I[Deterministic replay]
+```
+
+Core outputs:  
+`seed_yfinance_dividends_all.csv` for canonical seed rows,  
+`econ_severity_summary.csv` for econ-level review, and  
+`qa_queue__econ.csv` / `qa_queue__rows.csv` for operator action surfaces.
+
+---
 
 ## Overview
 
-This repository contains a **vendor-agnostic dividend event ingestion and QA engine** for dividend/corporate-action break scenarios in index futures / ETF-linked workflows.
+This repository focuses on **reproducible QA for imperfect dividend and corporate-action datasets** used in futures / ETF-linked workflows.
 
-The goal is not “perfect sourcing” but **reproducible, auditable handling of imperfect datasets**:
-
-- Missing / inconsistent fields
-- Symbol mapping failures
-- “Ticker exists but no dividends in window”
-- Unsupported markets/providers (intentional skip)
-- Duplicate / ambiguous corporate action events
+Rather than auto-resolving every ambiguity, `divpipe` produces a stable review surface:
+- canonical seed artefacts from provider pulls
+- deterministic event linking into `economic_event_id`
+- severity summaries and QA queues for operator review
+- replayable decisions via local override files
 
 All outputs are fixed, reviewable artefacts (CSVs) enabling a clean QA loop:
-
-- Inspect failures and risk surfaces
-- Apply controlled operator decisions (`data/overrides/qa_decisions.csv`, **do not commit**) and replay deterministically **offline**
-- Public demo decision examples may live under `data/overrides/*demo*.csv`; real operational decisions stay local
+- inspect failures and risk surfaces
+- apply controlled operator decisions (`data/overrides/qa_decisions.csv`, **do not commit**) and replay deterministically offline
+- keep public demo decision examples under `data/overrides/*demo*.csv` while real operational decisions remain local
 
 ---
 
@@ -40,16 +65,22 @@ python -m pip install -e .
 # Stage 0: iShares holdings (download -> normalise) [ONLINE]
 divpipe ishares download  --etf EEM --out data/raw/ishares
 divpipe ishares download  --etf EFA --out data/raw/ishares
+
+# NOTE: normalise requires a local mapping file (do not commit).
+# If you don't have data/mapping.csv yet, skip normalise and use the offline demo below.
 divpipe ishares normalise --etf EEM --map data/mapping.csv
 divpipe ishares normalise --etf EFA --map data/mapping.csv
 
 # Stage 1: ingest (online) -> writes run_root + refreshes output/runs/latest [ONLINE]
+# NOTE: requires holdings min CSVs (typically produced by the normalise step above).
 divpipe ingest \
   --holdings data/holdings_EEM_min.csv data/holdings_EFA_min.csv \
   --bgn 20240101 \
   --end 20260213
 
 # Stage 2: severity + QA queues (offline-capable) [OFFLINE OK if Stage 1 seed artefacts exist]
+# NOTE: qa_decisions.csv is local-only (do not commit).
+# If the file does not exist, Stage 2 will create a template CSV at that path and exit.
 divpipe severity \
   --qa-decisions data/overrides/qa_decisions.csv
 ```
@@ -89,10 +120,6 @@ Additional notes:
 ### Demo command (single copy/paste)
 
 ```bash
-# (optional) fresh editable install
-python -m pip uninstall -y msci-fv-engine || true
-python -m pip install -e .
-
 # 1) Create a local run-root (do NOT commit this)
 RUN_ROOT="output/runs/divpipe__demo_offline"
 mkdir -p "${RUN_ROOT}/stage1_seed"
@@ -106,7 +133,7 @@ mkdir -p output/runs
 rm -f output/runs/latest
 ln -s "$(python -c "import os; print(os.path.abspath('${RUN_ROOT}'))")" output/runs/latest
 
-# 2) Run Stage 2 (OFFLINE) using the demo decisions
+# 2) Run Stage 2 (OFFLINE) using the committed demo decisions
 divpipe severity \
   --run-root "${RUN_ROOT}" \
   --qa-decisions data/sample/overrides/qa_decisions_demo.csv
@@ -541,6 +568,44 @@ python scripts/gen_synthetic_rows_fixture.py ...
 ```
 
 ---
+
+## v2 roadmap
+
+- **SQLite-backed event store**  
+  Replace CSV-only intermediate state with an append-only observation/link model to support reproducible replay, link history, and persistent operator decisions.
+
+- **KR dividend adaptor**  
+  Finalise the Korean dividend parser and connect DART/KIND outputs into the canonical adaptor interface.
+
+- **Brazil event-identity hardening**  
+  Add explicit rules for JCP, monthly dividends, duplicate vendor observations, and ex-date roll-out scenarios to reduce QA noise without hiding genuine ambiguity.
+
+## Auxiliary context layer (experimental)
+
+This layer is designed as a **review-time context surface**, not as a core event-identity or deduplication input. Its role is to attach a compact weekly market-positioning overlay to QA outputs so that ambiguous event clusters can be reviewed with broader risk and crowding context.
+
+Planned components:
+
+- **Weekly COT shock calendar**  
+  Build a compact weekly calendar combining AM / HF / Dealer / OI shock signals, including co-occurrence tags for multi-signal shock weeks.
+
+- **Weekly regime artefact**  
+  Emit a weekly regime file (`cot_regime_weekly.csv`) with directional labels such as `RISK_ON`, `RISK_OFF`, and `NEUTRAL`, together with crowding-related flags.
+
+- **Minimal QA join surface**  
+  Attach a small, fixed set of weekly COT context columns to QA outputs, for example:
+  - `cot_am_flow_bps`
+  - `cot_hf_flow_bps`
+  - `cot_oi_shock_bps`
+  - `cot_risk_regime`
+
+Design intent:
+- Keep the surface deliberately small and stable
+- Join weekly context onto QA artefacts only
+- Avoid using COT-derived fields as primary linkage or event-identity keys
+
+---
+
 
 ## Disclaimer
 
